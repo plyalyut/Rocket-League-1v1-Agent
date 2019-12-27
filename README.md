@@ -1,13 +1,12 @@
-# RLBotPythonExample
-Example of a python bot using the RLBot framework
+# Rocket League 1v1 Agent
+A Deep Learning attempt to train a Rocket League agent to successfully perform in 1v1 settings.
 
-## Quick Start
-The easiest way to start a python bot is demonstrated here!
+## To Load
+The easiest way to start the bot is demonstrated here!
 https://youtu.be/YJ69QZ-EX7k
 
 It shows you how to:
 - Install the RLBot GUI
-- Use it to create a new bot
 
 ## Changing the bot
 
