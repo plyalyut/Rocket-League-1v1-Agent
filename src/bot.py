@@ -23,7 +23,7 @@ class MyBot(BaseAgent):
         self.reset_episode_data()
 
         # Sets up all the hyperparameters
-        self.episode_length = 10
+        self.episode_length = 100
 
         # Creates the model
         import tensorflow as tf
@@ -39,7 +39,7 @@ class MyBot(BaseAgent):
                 self.num_actions = 2
                 self.critic_scale = 0.5
 
-                self.act1 = tf.keras.layers.Dense(units=self.hidden_sz, input_shape=(6,), activation="relu")
+                self.act1 = tf.keras.layers.Dense(units=self.hidden_sz, input_shape=(4,), activation="relu")
                 self.mean = tf.keras.layers.Dense(self.num_actions, activation="tanh")
                 self.std = tf.keras.layers.Dense(self.num_actions, activation='sigmoid')
 
@@ -48,7 +48,7 @@ class MyBot(BaseAgent):
                 self.crit2 = tf.keras.layers.Dense(1)
 
                 # Create optimizer
-                self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00000001)
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
 
             @tf.function
             def call(self, states):
@@ -83,6 +83,7 @@ class MyBot(BaseAgent):
                 '''
 
                 advantage = tf.cast(tf.cast(tf.reshape(discounted_rewards, (-1, 1)), dtype=tf.float32) - self.critic(states), dtype=tf.float64)
+
                 mean, std = self.call(states)
 
                 mean = tf.cast(mean, dtype=tf.float64)
@@ -116,7 +117,7 @@ class MyBot(BaseAgent):
         :return: Reward, float
         '''
 
-        return 1.0/(1+(ball_location-goal_location).length()) + 1.0/(1+(player_location-goal_location).length())
+        return 1.0/(1+(ball_location-goal_location).length()) + 1/(1+(player_location-goal_location).length())
 
     def get_discounted_rewards(self, reward_list, discount_factor):
         '''
@@ -147,7 +148,7 @@ class MyBot(BaseAgent):
         :param vec3: Vector representaiton
         :return: list of x, y, z coordinates of a vector
         '''
-        return [vec3.x, vec3.y, vec3.z]
+        return [vec3.x/4096.0, vec3.y/5120.0]
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
         '''
@@ -170,9 +171,10 @@ class MyBot(BaseAgent):
         state.extend(self.convert_v3(agent_location))
 
         # Generate the action it should take
-        mean, std = self.a2c.call(np.reshape(np.array(state), [1, 6]))
+        mean, std = self.a2c.call(np.reshape(np.array(state), [1, 4]))
+
         action = np.random.normal(mean, std)
-        print(mean)
+        print(action)
 
         # Sets all the controller states
         self.controller_state.throttle = np.clip(action[0][0], -1, 1)
@@ -231,7 +233,3 @@ def draw_debug(renderer, reward, loss):
     renderer.draw_string_2d(0, 30, 2, 2, 'Loss:  ' + str(loss), renderer.white())
 
     renderer.end_rendering()
-
-
-
-
