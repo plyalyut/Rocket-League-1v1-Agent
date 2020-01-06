@@ -23,28 +23,31 @@ class MyBot(BaseAgent):
         self.reset_episode_data()
 
         # Sets up all the hyperparameters
-        self.episode_length = 100
+        self.episode_length = 10
 
         # Creates the model
         import tensorflow as tf
         self.tf = tf
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-        class A2C(self.tf.keras.Model):
+        class A2C_Continuous(self.tf.keras.Model):
             def __init__(self):
-                super(A2C, self).__init__()
+                super(A2C_Continuous, self).__init__()
                 # Actor Network
 
-                self.hidden_sz = 1000
+                self.hidden_sz = 100
                 self.num_actions = 2
                 self.critic_scale = 0.5
 
                 self.act1 = tf.keras.layers.Dense(units=self.hidden_sz, input_shape=(4,), activation="relu")
+                self.act2 = tf.keras.layers.Dense(units=self.hidden_sz, input_shape=(4,), activation='relu')
                 self.mean = tf.keras.layers.Dense(self.num_actions, activation="tanh")
                 self.std = tf.keras.layers.Dense(self.num_actions, activation='sigmoid')
 
                 # Critic Network
                 self.crit1 = tf.keras.layers.Dense(units= self.hidden_sz, activation="relu")
+                self.hidden_crit = tf.keras.layers.Dense(units = self.hidden_sz/2, activation = 'relu')
+                self.hidden_crit2 = tf.keras.layers.Dense(units = self.hidden_sz/10, activation = 'relu')
                 self.crit2 = tf.keras.layers.Dense(1)
 
                 # Create optimizer
@@ -58,7 +61,7 @@ class MyBot(BaseAgent):
                 :return: policies for the states of size (batch_size, num_actions)
                 '''
                 mean = self.mean(self.act1(states))
-                std = self.std(self.act1(states))
+                std = self.std(self.act2(states))
 
                 return mean, std
 
@@ -70,7 +73,7 @@ class MyBot(BaseAgent):
                 :return: values at each of the states (batch_size, 1)
                 '''
 
-                return self.crit2(self.crit1(states))
+                return self.crit2( self.hidden_crit2(self.hidden_crit(self.crit1(states))))
 
             @tf.function
             def loss(self, states, actions, discounted_rewards):
@@ -101,6 +104,68 @@ class MyBot(BaseAgent):
 
                 return actor_loss + self.critic_scale * critic_loss
 
+        class A2C(self.tf.keras.Model):
+            def __init__(self):
+                super(A2C, self).__init__()
+                # Actor Network
+
+                self.hidden_sz = 32
+                self.num_actions = 4
+                self.critic_scale = 0.5
+
+                self.act1 = tf.keras.layers.Dense(units=self.hidden_sz, input_shape=(2,), activation="relu")
+                self.act2 = tf.keras.layers.Dense(self.num_actions, activation='softmax')
+
+                # Critic Network
+                self.crit1 = tf.keras.layers.Dense(units= self.hidden_sz, activation="relu")
+                self.crit2 = tf.keras.layers.Dense(1)
+
+                # Create optimizer
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+
+            @tf.function
+            def call(self, states):
+                '''
+                Computes the policies from the states
+                :param states: np.array of (batch_size x num_states)
+                :return: policies for the states of size (batch_size, num_actions)
+                '''
+
+                return self.act2(self.act1(states))
+
+
+            @tf.function
+            def critic(self, states):
+                '''
+                Computes the value at each of the states
+                :param states: np.array of (batch size x num_states)
+                :return: values at each of the states (batch_size, 1)
+                '''
+
+                return self.crit2(self.crit1(states))
+
+            def loss(self, states, actions, discounted_rewards):
+                '''
+                Computes the loss for a given reward
+                :param states: a list of states (episode_length, num_states)
+                :parma actions: all the actions that were taken in the episode (episode_length, num_actions)
+                :param discounted_rewards: A list of discounted rewards (episode_length, 1)
+                :return: Loss of both the actor and critic
+                '''
+
+                state_values = self.critic(states)
+                policy = self.call(states)
+
+                advantage = tf.cast(discounted_rewards - state_values, dtype=tf.float32)
+
+                # The gather_nd is to get the probability of each action that was actually taken in the episode
+
+                log_P = tf.math.log(tf.gather_nd(policy, list(zip(np.arange(len(policy)), actions))))
+
+                actor_loss = -tf.reduce_sum(log_P * tf.stop_gradient(advantage))
+                critic_loss = tf.reduce_sum(tf.square(advantage))
+                return actor_loss + .5 * critic_loss
+
         self.a2c = A2C()
 
         print('Model Successfully Initialized Without any Issue')
@@ -117,7 +182,8 @@ class MyBot(BaseAgent):
         :return: Reward, float
         '''
 
-        return 1.0/(1+(ball_location-goal_location).length()) + 1/(1+(player_location-goal_location).length())
+        #return 1.0/(1+(ball_location-goal_location).length()) + 1/(1+(player_location-goal_location).length())
+        return 1/(1+(player_location-goal_location).length())
 
     def get_discounted_rewards(self, reward_list, discount_factor):
         '''
@@ -167,18 +233,27 @@ class MyBot(BaseAgent):
 
         # State of the ball and car
         state = []
-        state.extend(self.convert_v3(ball_location))
+        #state.extend(self.convert_v3(agent_location-target_goal_location))
         state.extend(self.convert_v3(agent_location))
 
         # Generate the action it should take
-        mean, std = self.a2c.call(np.reshape(np.array(state), [1, 4]))
+        prob_action = self.a2c.call(np.reshape(np.array(state), [1, 2]))
 
-        action = np.random.normal(mean, std)
+        action = np.random.choice(4, p=np.squeeze(prob_action))
         print(action)
 
         # Sets all the controller states
-        self.controller_state.throttle = np.clip(action[0][0], -1, 1)
-        self.controller_state.steer = np.clip(action[0][1], -1, 1)
+        if action%2:
+            self.controller_state.throttle = 1
+        else:
+            self.controller_state.throttle = 0
+        if int(action/2) == 0:
+            self.controller_state.steer = 1
+        else:
+            self.controller_state.steer = -1
+
+        #self.controller_state.throttle = np.clip(action[0][0], -1, 1)
+        #self.controller_state.steer = np.clip(action[0][1], -1, 1)
 
         # Keep track of all usable information
         self.states.append(state)
@@ -195,32 +270,10 @@ class MyBot(BaseAgent):
             with self.tf.GradientTape() as tape:
                 discounted_rewards = self.get_discounted_rewards(self.rewards_copy, 0.99)
                 loss = self.a2c.loss(self.states_copy, self.actions_copy, discounted_rewards)
-            draw_debug(self.renderer, np.sum(self.rewards), loss)
+            draw_debug(self.renderer, np.sum(discounted_rewards), loss)
             gradients = tape.gradient(loss, self.a2c.trainable_variables)
             self.a2c.optimizer.apply_gradients(zip(gradients, self.a2c.trainable_variables))
             self.reset_episode_data()
-
-
-        # Find the direction of our car using the Orientation class
-        #car_orientation = Orientation(my_car.physics.rotation)
-        #car_direction = car_orientation.forward
-
-        #steer_correction_radians = find_correction(car_direction, car_to_ball)
-
-        #if steer_correction_radians > 0:
-            # Positive radians in the unit circle is a turn to the left.
-        #    turn = -1.0  # Negative value for a turn to the left.
-        #    action_display = "turn left"
-        #else:
-        #    turn = 1.0
-        #    action_display = "turn right"
-
-        #self.controller_state.throttle = 1.0
-        #self.controller_state.steer = turn
-
-        #draw_debug(self.renderer, my_car, packet.game_ball, action_display)
-        #draw_boost_locations(self.renderer, my_car, self.get_field_info())
-
 
         return self.controller_state
 
@@ -231,5 +284,8 @@ def draw_debug(renderer, reward, loss):
     # print the action that the bot is taking
     renderer.draw_string_2d(0, 0, 2, 2, 'Reward: ' + str(reward), renderer.white())
     renderer.draw_string_2d(0, 30, 2, 2, 'Loss:  ' + str(loss), renderer.white())
-
     renderer.end_rendering()
+
+
+
+
